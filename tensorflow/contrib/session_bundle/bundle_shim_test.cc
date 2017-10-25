@@ -15,6 +15,7 @@ limitations under the License.
 
 #include "tensorflow/contrib/session_bundle/bundle_shim.h"
 
+#include "google/protobuf/any.pb.h"
 #include "tensorflow/cc/saved_model/signature_constants.h"
 #include "tensorflow/cc/saved_model/tag_constants.h"
 #include "tensorflow/contrib/session_bundle/test_util.h"
@@ -32,8 +33,6 @@ namespace {
 
 constexpr char kSessionBundlePath[] =
     "session_bundle/testdata/half_plus_two/00000123";
-constexpr char kSessionBundleMetaGraphFilename[] = "export.meta";
-constexpr char kSessionBundleVariablesFilename[] = "export-00000-of-00001";
 constexpr char kSavedModelBundlePath[] =
     "cc/saved_model/testdata/half_plus_two/00000123";
 
@@ -144,7 +143,7 @@ TEST(BundleShimTest, AddOutputToSignatureDef) {
 TEST(BundleShimTest, DefaultSignatureMissing) {
   MetaGraphDef meta_graph_def;
   // Signatures signatures;
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(0, meta_graph_def.signature_def_size());
 }
 
@@ -158,7 +157,7 @@ TEST(BundleShimTest, DefaultSignatureEmpty) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(0, meta_graph_def.signature_def_size());
 }
 
@@ -174,7 +173,7 @@ TEST(BundleShimTest, DefaultSignatureRegression) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(1, meta_graph_def.signature_def_size());
   const auto actual_signature_def =
       meta_graph_def.signature_def().find(kDefaultServingSignatureDefKey);
@@ -202,7 +201,7 @@ TEST(BundleShimTest, DefaultSignatureClassification) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(1, meta_graph_def.signature_def_size());
   const auto actual_signature_def =
       meta_graph_def.signature_def().find(kDefaultServingSignatureDefKey);
@@ -237,7 +236,7 @@ TEST(BundleShimTest, DefaultSignatureGeneric) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(0, meta_graph_def.signature_def_size());
 }
 
@@ -261,7 +260,7 @@ TEST(BundleShimTest, NamedRegressionSignatures) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   ASSERT_EQ(2, meta_graph_def.signature_def_size());
 
   ValidateSignatureDef(meta_graph_def, "foo",
@@ -315,7 +314,7 @@ TEST(BundleShimTest, NamedClassificationSignatures) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   ASSERT_EQ(2, meta_graph_def.signature_def_size());
 
   ValidateSignatureDef(meta_graph_def, "foo",
@@ -374,7 +373,7 @@ TEST(BundleShimTest, NamedSignatureGenericInputsAndOutputs) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(1, meta_graph_def.signature_def_size());
   const auto actual_signature_def =
       meta_graph_def.signature_def().find(kDefaultServingSignatureDefKey);
@@ -413,7 +412,7 @@ TEST(BundleShimTest, NamedSignatureGenericNoInputsOrOutputs) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(0, meta_graph_def.signature_def_size());
 }
 
@@ -434,7 +433,7 @@ TEST(BundleShimTest, NamedSignatureGenericOnlyInput) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(0, meta_graph_def.signature_def_size());
 }
 
@@ -473,7 +472,7 @@ TEST(BundleShimTest, DefaultAndNamedSignatureWithPredict) {
       .mutable_any_list()
       ->add_value()
       ->PackFrom(signatures);
-  ConvertSignaturesToSignatureDefs(&meta_graph_def);
+  TF_EXPECT_OK(ConvertSignaturesToSignatureDefs(&meta_graph_def));
   EXPECT_EQ(2, meta_graph_def.signature_def_size());
 
   // Verify that the default regression signature is converted to a

@@ -27,7 +27,18 @@ from tensorflow.python.training import training_ops
 class MomentumOptimizer(optimizer.Optimizer):
   """Optimizer that implements the Momentum algorithm.
 
-  @@__init__
+  Computes (if `use_nesterov = False`):
+  
+  ```
+  accumulation = momentum * accumulation + gradient
+  variable -= learning_rate * accumulation
+  ```
+
+  Note that in the dense version of this algorithm, `accumulation` is updated
+  and applied regardless of a gradient's value, whereas the sparse version (when
+  the gradient is an `IndexedSlices`, typically because of `tf.gather` or an
+  embedding) only updates variable slices and corresponding `accumulation` terms
+  when that part of the variable was used in the forward pass.
   """
 
   def __init__(self, learning_rate, momentum,
@@ -41,8 +52,11 @@ class MomentumOptimizer(optimizer.Optimizer):
       name: Optional name prefix for the operations created when applying
         gradients.  Defaults to "Momentum".
       use_nesterov: If `True` use Nesterov Momentum.
-        See [Sutskever et. al., 2013](
-        http://jmlr.org/proceedings/papers/v28/sutskever13.pdf)
+        See [Sutskever et al., 2013](
+        http://jmlr.org/proceedings/papers/v28/sutskever13.pdf).
+        This implementation always computes gradients at the value of the
+        variable(s) passed to the optimizer. Using Nesterov Momentum makes the
+        variable(s) track the values called `theta_t + mu*v_t` in the paper.
 
     """
     super(MomentumOptimizer, self).__init__(use_locking, name)
@@ -73,7 +87,7 @@ class MomentumOptimizer(optimizer.Optimizer):
   def _resource_apply_dense(self, grad, var):
     mom = self.get_slot(var, "momentum")
     return training_ops.resource_apply_momentum(
-        var, mom.handle,
+        var.handle, mom.handle,
         math_ops.cast(self._learning_rate_tensor, grad.dtype.base_dtype),
         grad,
         math_ops.cast(self._momentum_tensor, grad.dtype.base_dtype),
@@ -93,7 +107,7 @@ class MomentumOptimizer(optimizer.Optimizer):
   def _resource_apply_sparse(self, grad, var, indices):
     mom = self.get_slot(var, "momentum")
     return training_ops.resource_sparse_apply_momentum(
-        var, mom.handle,
+        var.handle, mom.handle,
         math_ops.cast(self._learning_rate_tensor, grad.dtype),
         grad, indices,
         math_ops.cast(self._momentum_tensor, grad.dtype),

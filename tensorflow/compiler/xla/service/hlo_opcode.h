@@ -18,6 +18,7 @@ limitations under the License.
 
 #include <iosfwd>
 #include <string>
+#include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
 
 namespace xla {
@@ -30,6 +31,9 @@ namespace xla {
 enum class HloOpcode {
   kAbs,
   kAdd,
+  kBatchNormGrad,
+  kBatchNormInference,
+  kBatchNormTraining,
   kBitcast,
   kBroadcast,
   kCall,
@@ -40,6 +44,7 @@ enum class HloOpcode {
   kConvert,
   kConvolution,
   kCopy,
+  kCos,
   kCrossReplicaSum,
   kCustomCall,
   kDivide,
@@ -55,11 +60,12 @@ enum class HloOpcode {
   kGt,
   kIndex,
   kInfeed,
+  kIsFinite,
   kLe,
   kLog,
-  kLogicalAnd,
-  kLogicalNot,
-  kLogicalOr,
+  kAnd,
+  kNot,
+  kOr,
   kLt,
   kMap,
   kMaximum,
@@ -73,15 +79,21 @@ enum class HloOpcode {
   kPower,
   kRecv,
   kReduce,
+  kReducePrecision,
   kReduceWindow,
   kRemainder,
   kReshape,
   kReverse,
   kRng,
+  kRoundNearestAfz,
   kSelect,
   kSelectAndScatter,
   kSend,
+  kShiftLeft,
+  kShiftRightArithmetic,
+  kShiftRightLogical,
   kSign,
+  kSin,
   kSlice,
   kSort,
   kSubtract,
@@ -96,12 +108,23 @@ enum class HloOpcode {
 // Returns a string representation of the opcode.
 string HloOpcodeString(HloOpcode opcode);
 
+// Returns a string representation of the opcode.
+StatusOr<HloOpcode> StringToHloOpcode(const string& opcode_name);
+
 inline std::ostream& operator<<(std::ostream& os, HloOpcode opcode) {
   return os << HloOpcodeString(opcode);
 }
 
 // Returns true iff the given opcode is a comparison operation.
 bool HloOpcodeIsComparison(HloOpcode opcode);
+
+// Returns true iff the given opcode has variadic operands.
+bool HloOpcodeIsVariadic(HloOpcode opcode);
+
+// Returns the number of HloOpcode values.
+inline const uint32_t HloOpcodeCount() {
+  return static_cast<uint32_t>(HloOpcode::kWhile) + 1;
+}
 
 }  // namespace xla
 

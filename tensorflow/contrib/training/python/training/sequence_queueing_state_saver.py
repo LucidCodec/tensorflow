@@ -344,7 +344,7 @@ def _prepare_sequence_inputs(inputs, states):
   key = _check_rank(inputs.key, 0)
 
   if length.dtype != dtypes.int32:
-    raise TypeError("length dtype must be int32, but recieved: %s" %
+    raise TypeError("length dtype must be int32, but received: %s" %
                     length.dtype)
   if key.dtype != dtypes.string:
     raise TypeError("key dtype must be string, but received: %s" % key.dtype)
@@ -1329,6 +1329,7 @@ def batch_sequences_with_states(input_key,
       input_key=key,
       input_sequences=sequences,
       input_context=context,
+      input_length=tf.shape(sequences["input"])[0],
       initial_states=initial_states,
       num_unroll=num_unroll,
       batch_size=batch_size,
@@ -1442,6 +1443,7 @@ def batch_sequences_with_states(input_key,
       input_length = input_length if input_length is not None else length
     elif input_sequences:
       # Assert that value_length is a multiple of num_unroll.
+      checked_input_sequences = {}
       for key, value in input_sequences.items():
         if (isinstance(value, sparse_tensor.SparseTensor) or
             isinstance(value, sparse_tensor.SparseTensorValue)):
@@ -1459,11 +1461,13 @@ def batch_sequences_with_states(input_key,
                           ", but saw value: ",
                           string_ops.as_string(value_length),
                           ". Consider setting pad=True."])])]):
-            input_sequences[key] = sparse_tensor.SparseTensor(
-                indices=value.indices,
+            checked_input_sequences[key] = sparse_tensor.SparseTensor(
+                indices=array_ops.identity(
+                    value.indices, name="multiple_of_checked"),
                 values=array_ops.identity(
                     value.values, name="multiple_of_checked"),
-                dense_shape=value.dense_shape)
+                dense_shape=array_ops.identity(
+                    value.dense_shape, name="multiple_of_checked"))
         else:
           if not isinstance(value, ops.Tensor):
             try:
@@ -1489,9 +1493,11 @@ def batch_sequences_with_states(input_key,
                       ])
                   ])
           ]):
-            input_sequences[key] = array_ops.identity(
+            checked_input_sequences[key] = array_ops.identity(
                 value, name="multiple_of_checked")
-
+      input_sequences = checked_input_sequences
+    # Move SparseTensors in context into input_sequences.
+    _move_sparse_tensor_out_context(input_context, input_sequences, num_unroll)
     # Deconstruct SparseTensors in sequence into a dense Tensor before inputting
     # to SQSS.
     (transformed_input_seq,
@@ -1536,6 +1542,8 @@ def batch_sequences_with_states(input_key,
         tensor_list,
         batch_size,
         num_unroll)
+    # Move select SparseTensors back to context.
+    _move_sparse_tensor_in_context(batch.context, batch.sequences)
     return batch
 
 
@@ -1588,7 +1596,7 @@ def _padding(sequences, num_unroll):
   else:  # Only have SparseTensors
     sparse_lengths = [value.dense_shape[0] for value in sequences_dict.values()
                       if isinstance(value, sparse_tensor.SparseTensor)]
-    length = math_ops.maximum(sparse_lengths)
+    length = math_ops.reduce_max(math_ops.to_int32(sparse_lengths))
 
   unroll = array_ops.constant(num_unroll)
   padded_length = length + ((unroll - (length % unroll)) % unroll)
@@ -1620,6 +1628,113 @@ def _padding(sequences, num_unroll):
   return length, padded_sequences
 
 
+_SPARSE_CONTEXT_PREFIX_KEY = "_context_in_seq_"
+
+
+def _move_sparse_tensor_out_context(input_context, input_sequences, num_unroll):
+  """Moves `SparseTensor`s from `input_context` into `input_sequences` as seq.
+
+  For `key, value` pairs in `input_context` with `SparseTensor` `value` removes
+  them from `input_context` and transforms the `value` into a sequence and
+  then adding `key`, transformed `value` into `input_seuqences`.
+  The transformation is done by adding a new first dimension of `value_length`
+  equal to that of the other values in input_sequences` and tiling the `value`
+  every `num_unroll` steps.
+
+  Args:
+    input_context: dictionary with `Tensor` or `SparseTensor` values. To be
+      modified to take out `SparseTensor` values.
+    input_sequences: dictionary with `Tensor` or `SparseTensor` values. To be
+      modified to add transformed `SparseTensor` values from `input_context`.
+    num_unroll: int specifying to what multiple to pad sequences to.
+  """
+  value_length = array_ops.constant(1)
+  if input_sequences:
+    seq = list(input_sequences.values())[0]
+    if isinstance(seq, ops.Tensor):
+      with ops.control_dependencies([seq]):
+        value_length = array_ops.shape(seq)[0]
+    else:
+      value_length = seq.dense_shape[0]
+  value_length = math_ops.cast(value_length, dtype=dtypes.int64)
+  def _copy_sparse_tensor(sp_tensor):
+    """Operation to tile a sparse tensor along a newly added 0 dimension.
+
+    Adding a new first dimension of `value_length` and tiling the `sp_tensor`
+    every `num_unroll` steps.
+
+    Args:
+      sp_tensor: `SparseTensor`.
+    Returns:
+      `SparseTensor` sequence with `sp_tensor` tiled.
+    """
+    n = value_length // num_unroll
+    n = math_ops.cast(n, dtype=dtypes.int32)
+    values = array_ops.tile(sp_tensor.values, array_ops.expand_dims(n, 0))
+    shape = array_ops.concat(
+        [array_ops.expand_dims(value_length, 0), sp_tensor.dense_shape], 0)
+
+    # Construct new indices by multiplying old ones and prepending [0, n).
+    # First multiply indices n times along a newly created 0-dimension.
+    multiplied_indices = array_ops.tile(
+        array_ops.expand_dims(sp_tensor.indices, 0),
+        array_ops.stack([n, 1, 1]))
+
+    # Construct indicator for [0, n).
+    # [ [ [0] [0] ... [0] ]
+    #   [ [num_unroll] [num_unroll] ... [num_unroll] ]
+    #     ...
+    #   [ [num_unroll*(n-1)] [num_unroll*(n-1)] ... [num_unroll*(n-1)] ] ]
+    # of shape [n, shape(sp_tensor.indices)[0], 1]
+    # Get current dimensions of indices.
+    dim0 = array_ops.shape(sp_tensor.indices)[0]
+    dim1 = array_ops.shape(sp_tensor.indices)[1]
+    ind = math_ops.range(start=0, limit=value_length, delta=num_unroll)
+
+    # ind.set_shape([n])
+    ind = array_ops.expand_dims(ind, 1)
+    ind = array_ops.expand_dims(ind, 2)
+    ind = array_ops.tile(ind, [1, dim0, 1])
+
+    # Concatenate both and reshape.
+    indices = array_ops.concat([ind, multiplied_indices], 2)
+    indices = array_ops.reshape(indices, [dim0 * n, dim1 + 1])
+
+    return sparse_tensor.SparseTensor(indices=indices,
+                                      values=values,
+                                      dense_shape=shape)
+
+  sparse_tensor_keys = [
+      k for k in sorted(input_context.keys())
+      if (isinstance(input_context[k], sparse_tensor.SparseTensor) or
+          isinstance(input_context[k], sparse_tensor.SparseTensorValue))]
+  for key in sparse_tensor_keys:
+    input_sequences[_SPARSE_CONTEXT_PREFIX_KEY + key] = _copy_sparse_tensor(
+        input_context[key])
+    del input_context[key]
+
+
+def _move_sparse_tensor_in_context(context, sequences):
+  sparse_tensor_keys = [
+      k for k in sorted(sequences) if k.startswith(_SPARSE_CONTEXT_PREFIX_KEY)]
+  for key in sparse_tensor_keys:
+    new_key = key[len(_SPARSE_CONTEXT_PREFIX_KEY):]
+    sp_tensor = sequences[key]
+    # Take out time dimension.
+    sp_tensor = sparse_tensor.SparseTensor(
+        sp_tensor.indices,  # with only 0s at column 1 representing time.
+        sp_tensor.values,
+        array_ops.concat(
+            [[sp_tensor.dense_shape[0]],  # batch
+             [1],  # time
+             sp_tensor.dense_shape[2:]],  # SparseTensor shape prior to batching
+            0))
+    new_shape = array_ops.concat(
+        [[sp_tensor.dense_shape[0]], sp_tensor.dense_shape[2:]], 0)
+    context[new_key] = sparse_ops.sparse_reshape(sp_tensor, new_shape)
+    del sequences[key]
+
+
 def _deconstruct_sparse_tensor_seq(input_sequence, shared_name=None):
   """Converts `SparseTensor` values into `Tensors` of IDs and meta data.
 
@@ -1643,7 +1758,8 @@ def _deconstruct_sparse_tensor_seq(input_sequence, shared_name=None):
   """
   sparse_tensor_keys = [
       k for k in sorted(input_sequence.keys())
-      if isinstance(input_sequence[k], sparse_tensor.SparseTensor)]
+      if (isinstance(input_sequence[k], sparse_tensor.SparseTensor) or
+          isinstance(input_sequence[k], sparse_tensor.SparseTensorValue))]
   if not sparse_tensor_keys:
     return input_sequence, None, sparse_tensor_keys
   sparse_tensor_list = [input_sequence[k] for k in sparse_tensor_keys]
@@ -1699,7 +1815,7 @@ def _reconstruct_sparse_tensor_seq(sequence,
 
     Counter-part of `_flatten_tensor` which is called on the input of
     `_restore_sparse` while this method is called on the output of it.
-    Together they  work around the limitation of `_restore_sparse` to only
+    Together they work around the limitation of `_restore_sparse` to only
     accept 1D handles.
 
     The `indices` in `sp_tensor` is a 2D `Tensor` of `shape [N, ndims]`, where

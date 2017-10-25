@@ -27,10 +27,10 @@ from tensorflow.core.framework import op_def_pb2
 from tensorflow.python.framework import constant_op
 from tensorflow.python.framework import device
 from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import function
 from tensorflow.python.framework import importer
-from tensorflow.python.framework import op_def_registry
 from tensorflow.python.framework import ops
-from tensorflow.python.framework import tensor_shape
+from tensorflow.python.framework import test_ops  # pylint: disable=unused-import
 from tensorflow.python.framework import versions
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import gradients_impl
@@ -40,117 +40,6 @@ from tensorflow.python.ops import random_ops
 from tensorflow.python.ops import variables
 import tensorflow.python.ops.nn_grad  # pylint: disable=unused-import
 from tensorflow.python.platform import test
-
-
-def _unknown_shape(op):
-  return [tensor_shape.unknown_shape() for _ in op.outputs]
-
-
-# NOTE(cwhipkey): Dummy shape registration for ops used in the tests, since they
-# don't have C++ op registrations on which to attach C++ shape fns.
-ops.RegisterShape("If")(_unknown_shape)
-ops.RegisterShape("Iff")(_unknown_shape)
-ops.RegisterShape("Ii")(_unknown_shape)
-ops.RegisterShape("Iif")(_unknown_shape)
-ops.RegisterShape("Iii")(_unknown_shape)
-ops.RegisterShape("In")(_unknown_shape)
-ops.RegisterShape("Iri")(_unknown_shape)
-ops.RegisterShape("None")(_unknown_shape)
-ops.RegisterShape("Of")(_unknown_shape)
-ops.RegisterShape("Oi")(_unknown_shape)
-ops.RegisterShape("Oif")(_unknown_shape)
-ops.RegisterShape("Oii")(_unknown_shape)
-ops.RegisterShape("OpWithDefaultAttr")(_unknown_shape)
-ops.RegisterShape("OpWithFutureDefaultAttr")(_unknown_shape)
-ops.RegisterShape("Or")(_unknown_shape)
-ops.RegisterShape("Otl")(_unknown_shape)
-ops.RegisterShape("Unary")(_unknown_shape)
-
-_op_list = op_def_pb2.OpList()
-text_format.Merge("""
-  op {
-    name: 'None'
-  }
-  op {
-    name: 'Oi'
-    output_arg { name: 'a' type: DT_INT32 }
-  }
-  op {
-    name: 'Or'
-    output_arg { name: 'a' type: DT_INT32 is_ref: true }
-  }
-  op {
-    name: 'Of'
-    output_arg { name: 'a' type: DT_FLOAT }
-  }
-  op {
-    name: 'Ii'
-    input_arg { name: 'a' type: DT_INT32 }
-  }
-  op {
-    name: 'If'
-    input_arg { name: 'a' type: DT_FLOAT }
-  }
-  op {
-    name: 'Oii'
-    output_arg { name: 'a' type: DT_INT32 }
-    output_arg { name: 'b' type: DT_INT32 }
-  }
-  op {
-    name: 'Oif'
-    output_arg { name: 'a' type: DT_INT32 }
-    output_arg { name: 'b' type: DT_FLOAT }
-  }
-  op {
-    name: 'Iii'
-    input_arg { name: 'a' type: DT_INT32 }
-    input_arg { name: 'b' type: DT_INT32 }
-  }
-  op {
-    name: 'Iff'
-    input_arg { name: 'a' type: DT_FLOAT }
-    input_arg { name: 'b' type: DT_FLOAT }
-  }
-  op {
-    name: 'Iif'
-    input_arg { name: 'a' type: DT_INT32 }
-    input_arg { name: 'b' type: DT_FLOAT }
-  }
-  op {
-    name: 'Iri'
-    input_arg { name: 'a' type: DT_INT32 is_ref: true }
-    input_arg { name: 'b' type: DT_INT32 }
-  }
-  op {
-    name: 'In'
-    input_arg { name: 'a' number_attr: 'N' type_attr: 'T' }
-    attr { name: 'N' type: 'int' minimum: 1 }
-    attr { name: 'T' type: 'type' }
-  }
-  op {
-    name: 'Otl'
-    output_arg { name: 'a' type_list_attr: 't' }
-    attr { name: 'T' type: 'list(type)' minimum: 1 }
-  }
-  op {
-    name: 'Unary'
-    input_arg { name: 'a' type_attr: 'T' }
-    output_arg { name: 'b' type_attr: 'T' }
-    attr { name: 'T' type: 'type' }
-  }
-  op {
-    name: 'OpWithDefaultAttr'
-    output_arg { name: 'a' type: DT_INT32 }
-    attr { name: 'default_float' type: 'float' default_value { f: 123.0 } }
-  }
-  op {
-    name: 'OpWithFutureDefaultAttr'
-  }
-""", _op_list)
-op_def_registry.register_op_list(_op_list)
-# NOTE(mrry): Dummy shape registrations for ops used in the tests.
-for op_def in _op_list.op:
-  ops.RegisterShape(op_def.name)(None)
 
 
 class ImportGraphDefTest(test.TestCase):
@@ -170,15 +59,15 @@ class ImportGraphDefTest(test.TestCase):
     with ops.Graph().as_default():
       a, b, c, d = importer.import_graph_def(
           self._MakeGraphDef("""
-          node { name: 'A' op: 'Oif' }
-          node { name: 'B' op: 'Otl'
-                 attr { key: 't'
+          node { name: 'A' op: 'IntOutputFloatOutput' }
+          node { name: 'B' op: 'ListOutput'
+                 attr { key: 'T'
                         value { list { type: DT_INT32 type: DT_FLOAT } } } }
-          node { name: 'C' op: 'In'
+          node { name: 'C' op: 'ListInput'
                  attr { key: 'N' value { i: 2 } }
                  attr { key: 'T' value { type: DT_INT32 } }
                  input: 'A:0' input: 'B:0' }
-          node { name: 'D' op: 'In'
+          node { name: 'D' op: 'ListInput'
                  attr { key: 'N' value { i: 2 } }
                  attr { key: 'T' value { type: DT_FLOAT } }
                  input: 'A:1' input: 'B:1' }
@@ -201,10 +90,10 @@ class ImportGraphDefTest(test.TestCase):
       self.assertEqual(d.inputs[1], b.outputs[1])
 
       # Check the types of the returned ops and tensors.
-      self.assertEqual(a.type, "Oif")
-      self.assertEqual(b.type, "Otl")
-      self.assertEqual(c.type, "In")
-      self.assertEqual(d.type, "In")
+      self.assertEqual(a.type, "IntOutputFloatOutput")
+      self.assertEqual(b.type, "ListOutput")
+      self.assertEqual(c.type, "ListInput")
+      self.assertEqual(d.type, "ListInput")
       self.assertEqual(a.outputs[0].dtype, dtypes.int32)
       self.assertEqual(a.outputs[1].dtype, dtypes.float32)
       self.assertEqual(b.outputs[0].dtype, dtypes.int32)
@@ -226,13 +115,13 @@ class ImportGraphDefTest(test.TestCase):
 
       a, b, c, d = importer.import_graph_def(
           self._MakeGraphDef("""
-          node { name: 'A' op: 'Oii' }
-          node { name: 'B' op: 'Oii' }
-          node { name: 'C' op: 'In'
+          node { name: 'A' op: 'TwoIntOutputs' }
+          node { name: 'B' op: 'TwoIntOutputs' }
+          node { name: 'C' op: 'ListInput'
                  attr { key: 'N' value { i: 2 } }
                  attr { key: 'T' value { type: DT_INT32 } }
                  input: 'A:0' input: 'B:0' }
-          node { name: 'D' op: 'In'
+          node { name: 'D' op: 'ListInput'
                  attr { key: 'N' value { i: 2 } }
                  attr { key: 'T' value { type: DT_INT32 } }
                  input: 'A:1' input: 'B:1' }
@@ -253,13 +142,13 @@ class ImportGraphDefTest(test.TestCase):
 
       a, b, c, d = importer.import_graph_def(
           self._MakeGraphDef("""
-          node { name: 'A' op: 'Oii' }
-          node { name: 'B' op: 'Oii' }
-          node { name: 'C' op: 'In'
+          node { name: 'A' op: 'TwoIntOutputs' }
+          node { name: 'B' op: 'TwoIntOutputs' }
+          node { name: 'C' op: 'ListInput'
                  attr { key: 'N' value { i: 2 } }
                  attr { key: 'T' value { type: DT_INT32 } }
                  input: 'A:0' input: 'B:0' }
-          node { name: 'D' op: 'In'
+          node { name: 'D' op: 'ListInput'
                  attr { key: 'N' value { i: 2 } }
                  attr { key: 'T' value { type: DT_INT32 } }
                  input: 'A:1' input: 'B:1' }
@@ -280,13 +169,13 @@ class ImportGraphDefTest(test.TestCase):
 
       a, b, c, d = importer.import_graph_def(
           self._MakeGraphDef("""
-          node { name: 'A' op: 'Oii' }
-          node { name: 'B' op: 'Oii' }
-          node { name: 'C' op: 'In'
+          node { name: 'A' op: 'TwoIntOutputs' }
+          node { name: 'B' op: 'TwoIntOutputs' }
+          node { name: 'C' op: 'ListInput'
                  attr { key: 'N' value { i: 2 } }
                  attr { key: 'T' value { type: DT_INT32 } }
                  input: 'A:0' input: 'B:0' }
-          node { name: 'D' op: 'In'
+          node { name: 'D' op: 'ListInput'
                  attr { key: 'N' value { i: 2 } }
                  attr { key: 'T' value { type: DT_INT32 } }
                  input: 'A:1' input: 'B:1' }
@@ -304,8 +193,8 @@ class ImportGraphDefTest(test.TestCase):
     with ops.Graph().as_default():
       a, b = importer.import_graph_def(
           self._MakeGraphDef("""
-          node { name: 'A' op: 'Oii' }
-          node { name: 'B' op: 'Ii' input: 'A' }
+          node { name: 'A' op: 'TwoIntOutputs' }
+          node { name: 'B' op: 'IntInput' input: 'A' }
           """),
           return_elements=["A", "B"])
 
@@ -316,8 +205,8 @@ class ImportGraphDefTest(test.TestCase):
       feed_a_0 = constant_op.constant(0, dtype=dtypes.int32)
       b, = importer.import_graph_def(
           self._MakeGraphDef("""
-          node { name: 'A' op: 'Oii' }
-          node { name: 'B' op: 'Ii' input: 'A:0' }
+          node { name: 'A' op: 'TwoIntOutputs' }
+          node { name: 'B' op: 'IntInput' input: 'A:0' }
           """),
           input_map={"A": feed_a_0},
           return_elements=["B"])
@@ -339,10 +228,10 @@ class ImportGraphDefTest(test.TestCase):
     with ops.Graph().as_default():
       a, b, c, d = importer.import_graph_def(
           self._MakeGraphDef("""
-          node { name: 'A' op: 'Or' }
-          node { name: 'B' op: 'Oi' }
-          node { name: 'C' op: 'Iii' input: 'A:0' input: 'B:0' }
-          node { name: 'D' op: 'Iri' input: 'A:0' input: 'B:0' }
+          node { name: 'A' op: 'RefOutput' }
+          node { name: 'B' op: 'IntOutput' }
+          node { name: 'C' op: 'TwoIntInputs' input: 'A:0' input: 'B:0' }
+          node { name: 'D' op: 'RefInputIntInput' input: 'A:0' input: 'B:0' }
           """),
           return_elements=["A", "B", "C", "D"])
 
@@ -376,8 +265,8 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'A' op: 'Oi' }
-            node { name: 'B' op: 'If' input: 'A:0' }
+            node { name: 'A' op: 'IntOutput' }
+            node { name: 'B' op: 'FloatInput' input: 'A:0' }
             """))
       self.assertTrue(
           "Cannot convert a tensor of type int32 to an input of type float" in
@@ -403,7 +292,7 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         _ = importer.import_graph_def(
             self._MakeGraphDef("""
-              node { name: 'A' op: 'Of' }
+              node { name: 'A' op: 'FloatOutput' }
               node { name: 'B' op: 'L2Loss'
                      input: 'A:0'
                      attr { key: 'T' value { type: DT_FLOAT } }
@@ -420,7 +309,7 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'A' op: 'Oi' }
+            node { name: 'A' op: 'IntOutput' }
             node { name: 'B' op: 'None' input: 'A:0' }
             """))
       self.assertTrue("More inputs specified ('A:0') than the op expects" in
@@ -431,8 +320,8 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'A' op: 'Oi' }
-            node { name: 'B' op: 'Iif' input: 'A:0' }
+            node { name: 'A' op: 'IntOutput' }
+            node { name: 'B' op: 'IntInputFloatInput' input: 'A:0' }
             """))
       self.assertTrue("Input types mismatch (expected 'int32, float32' but "
                       "got 'int32')" in str(e.exception))
@@ -442,7 +331,7 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'B' op: 'If' input: 'A:0' }
+            node { name: 'B' op: 'FloatInput' input: 'A:0' }
             """))
       self.assertTrue("Input tensor 'A:0' not found" in str(e.exception))
 
@@ -451,7 +340,7 @@ class ImportGraphDefTest(test.TestCase):
       feed_a_0 = constant_op.constant(5.0)
       b, = importer.import_graph_def(
           self._MakeGraphDef("""
-          node { name: 'B' op: 'If' input: 'A:0' }
+          node { name: 'B' op: 'FloatInput' input: 'A:0' }
           """),
           input_map={"A:0": feed_a_0},
           return_elements=["B"])
@@ -462,8 +351,8 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'A' op: 'Of' }
-            node { name: 'B' op: 'If' input: 'A:1' }
+            node { name: 'A' op: 'FloatOutput' }
+            node { name: 'B' op: 'FloatInput' input: 'A:1' }
             """))
       self.assertTrue("Input tensor 'A:1' not found" in str(e.exception))
 
@@ -512,7 +401,7 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'A' op: 'Oi' }
+            node { name: 'A' op: 'IntOutput' }
             """),
             return_elements=["A:1"])
       self.assertTrue(
@@ -521,7 +410,7 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'A' op: 'Oi' }
+            node { name: 'A' op: 'IntOutput' }
             """),
             return_elements=["B:0"])
       self.assertTrue(
@@ -530,7 +419,7 @@ class ImportGraphDefTest(test.TestCase):
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'A' op: 'Oi' }
+            node { name: 'A' op: 'IntOutput' }
             """),
             return_elements=["A:B:0"])
       self.assertTrue(
@@ -546,13 +435,31 @@ class ImportGraphDefTest(test.TestCase):
             input_map={"B:0": constant_op.constant(5.0)})
       self.assertTrue("not found in graph_def: [B:0]" in str(e.exception))
 
+  def testInputMapUnusedAsInput(self):
+    with ops.Graph().as_default():
+      # Mapping an unused node output should succeed.
+      importer.import_graph_def(
+          self._MakeGraphDef("""
+          node { name: 'A' op: 'IntOutput' }
+          """),
+          input_map={"A:0": constant_op.constant(5.0)})
+
+      # Mapping a non-existent output of an existing node should fail.
+      with self.assertRaises(ValueError) as e:
+        importer.import_graph_def(
+            self._MakeGraphDef("""
+            node { name: 'A' op: 'IntOutput' }
+            """),
+            input_map={"A:2": constant_op.constant(5.0)})
+      self.assertTrue("not found in graph_def: [A:2]" in str(e.exception))
+
   def testInputMapTypeMismatch(self):
     with ops.Graph().as_default():
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
             self._MakeGraphDef("""
-            node { name: 'A' op: 'Oi' }
-            node { name: 'B' op: 'Ii' input: 'A:0' }
+            node { name: 'A' op: 'IntOutput' }
+            node { name: 'B' op: 'IntInput' input: 'A:0' }
             """),
             input_map={"A:0": constant_op.constant(5.0)})
       self.assertTrue(
@@ -597,6 +504,124 @@ class ImportGraphDefTest(test.TestCase):
             key: '_class'
             value { list { s: 'loc:@imported_graph/A' } }
           } }""", b.graph.as_graph_def())
+
+  def testColocationWithDeviceFn(self):
+    original_graph_def = self._MakeGraphDef("""
+          node { name: 'A' op: 'None' attr {
+            key: '_class'
+            value { list { s: 'loc:@A' } }
+          } }
+          node { name: 'B' op: 'None'  attr {
+            key: '_class'
+            value { list { s: 'loc:@A' } }
+          } }""")
+
+    # A device function that places "A" on one device and "B" on
+    # another device.  Because B is colocated with A, we test that B's
+    # device function is overridden by A.
+    def CustomDeviceFn(op):
+      if "A" in op.name:
+        return "/device:A:0"
+      else:
+        return "/device:B:0"
+
+    with ops.Graph().as_default():
+      with ops.device(CustomDeviceFn):
+        b, = importer.import_graph_def(
+            original_graph_def, return_elements=["B"], name="imported_graph")
+
+      self.assertProtoEqualsVersion("""
+          node { name: 'imported_graph/A' op: 'None' device: "/device:A:0"
+                attr {
+                  key: '_class' value { list { s: 'loc:@imported_graph/A' } }
+                }
+          }
+          node { name: 'imported_graph/B' op: 'None' device: "/device:A:0"
+                attr {
+                  key: '_class' value { list { s: 'loc:@imported_graph/A' } }
+          } }""", b.graph.as_graph_def())
+
+    # Test a scenario where 'A' doesn't get a device; 'A' should
+    # not have a device, but during runtime will get colocated with
+    # 'B' because of the colocation attribute.
+    def BDeviceFn(op):
+      if "B" in op.name:
+        return "/device:B:0"
+      return ""
+
+    with ops.Graph().as_default():
+      with ops.device(BDeviceFn):
+        b, = importer.import_graph_def(
+            original_graph_def, return_elements=["B"], name="imported_graph")
+
+      self.assertProtoEqualsVersion("""
+          node { name: 'imported_graph/A' op: 'None'
+                attr {
+                  key: '_class' value { list { s: 'loc:@imported_graph/A' } }
+                }
+          }
+          node { name: 'imported_graph/B' op: 'None'
+                attr {
+                  key: '_class' value { list { s: 'loc:@imported_graph/A' } }
+          } }""", b.graph.as_graph_def())
+
+    # Only A gets a device, so B inherits it implicitly.
+    def ADeviceFn(op):
+      if "A" in op.name:
+        return "/device:A:0"
+      return ""
+
+    with ops.Graph().as_default():
+      with ops.device(ADeviceFn):
+        b, = importer.import_graph_def(
+            original_graph_def, return_elements=["B"], name="imported_graph")
+
+      self.assertProtoEqualsVersion("""
+          node { name: 'imported_graph/A' op: 'None' device: "/device:A:0"
+                attr {
+                  key: '_class' value { list { s: 'loc:@imported_graph/A' } }
+                }
+          }
+          node { name: 'imported_graph/B' op: 'None' device: "/device:A:0"
+                attr {
+                  key: '_class' value { list { s: 'loc:@imported_graph/A' } }
+          } }""", b.graph.as_graph_def())
+
+  def testMultipleColocationWithDeviceFn(self):
+    original_graph_def = self._MakeGraphDef("""
+          node { name: 'A' op: 'None'}
+          node { name: 'B' op: 'None'}
+          node { name: 'C' op: 'None'  attr {
+            key: '_class'
+            value { list { s: 'loc:@A' s: 'loc:@B' } }
+          } }""")
+
+    # A device function that places "B" on a device, and "A" is empty.
+    #
+    # B and C should contain "/device:B".  A will not right now.  But
+    # because of the colocation property, at runtime it would be
+    # placed with B and C.
+    def CustomDeviceFn(op):
+      if "B" in op.name:
+        return "/device:B:0"
+      return ""
+
+    with ops.Graph().as_default():
+      with ops.device(CustomDeviceFn):
+        c, = importer.import_graph_def(
+            original_graph_def, return_elements=["C"], name="imported_graph")
+
+      self.assertProtoEqualsVersion("""
+          node { name: 'imported_graph/A' op: 'None' }
+          node { name: 'imported_graph/B' op: 'None' device: "/device:B:0" }
+          node { name: 'imported_graph/C' op: 'None' device: "/device:B:0"
+                 attr {
+                   key: '_class' value {
+                     list { s: 'loc:@imported_graph/A'
+                            s: 'loc:@imported_graph/B' }
+                   }
+                 }
+               }""", c.graph.as_graph_def())
 
   def testNamePrefixColocationAttrsMultipleImport(self):
     original_graph_def = self._MakeGraphDef("""
@@ -653,13 +678,28 @@ class ImportGraphDefTest(test.TestCase):
             self._MakeGraphDef(""), input_map=[constant_op.constant(5.0)])
       self.assertEqual("input_map must be a dictionary mapping strings to "
                        "Tensor objects.", str(e.exception))
+    graph_def = self._MakeGraphDef("""
+         node { name: 'a' op: 'Placeholder'
+                attr { key: 'dtype' value { type: DT_FLOAT } }}
+         node { name: 'id' op: 'Identity' input: 'a:0'
+                attr { key: 'T' value { type: DT_FLOAT } }}""")
+    with ops.Graph().as_default():
       with self.assertRaises(ValueError) as e:
         importer.import_graph_def(
-            self._MakeGraphDef(""),
-            input_map={"a:0": constant_op.constant(5.0)},
+            graph_def,
+            input_map={"a:0": variables.Variable(5.0)},
             name="")
-      self.assertEqual("tf.import_graph_def() requires a non-empty `name` "
-                       "if `input_map` is used.", str(e.exception))
+      self.assertStartsWith(str(e.exception),
+                            "tf.import_graph_def() requires a non-empty `name` "
+                            "if `input_map` contains non-Tensor values.")
+    with ops.Graph().as_default():
+      t, = importer.import_graph_def(
+          graph_def,
+          input_map={"a:0": constant_op.constant(5.0)},
+          name="",
+          return_elements=["id:0"])
+      with self.test_session():
+        self.assertEqual(5.0, t.eval())
 
   def testInvalidInputForReturnOperations(self):
     with ops.Graph().as_default():
@@ -667,6 +707,17 @@ class ImportGraphDefTest(test.TestCase):
         importer.import_graph_def(self._MakeGraphDef(""), return_elements=[7])
       self.assertEqual("return_elements must be a list of strings.",
                        str(e.exception))
+
+  def testDuplicateOperationNames(self):
+    with ops.Graph().as_default():
+      with self.assertRaises(ValueError) as e:
+        importer.import_graph_def(
+            self._MakeGraphDef("""
+            node { name: 'A' op: 'IntOutput' }
+            node { name: 'B' op: 'IntOutput' }
+            node { name: 'A' op: 'IntOutput' }
+            """))
+      self.assertEqual("Duplicate name 'A' in GraphDef.", str(e.exception))
 
   def testWithExtensionAndAttr(self):
     with ops.Graph().as_default() as g:
@@ -714,7 +765,7 @@ class ImportGraphDefTest(test.TestCase):
         self.assertEqual(c.device, c4.device)  # worker overrides ps.
 
     with ops.Graph().as_default():
-      with ops.device(device.merge_device("/gpu:0")):
+      with ops.device(device.merge_device("/device:GPU:0")):
         a5, b5, c5 = importer.import_graph_def(
             gdef, return_elements=["a", "b", "c"])
         self.assertEqual("/device:GPU:0", a5.device)
@@ -724,26 +775,27 @@ class ImportGraphDefTest(test.TestCase):
   def testWithDeviceFunctionDependingOnInputs(self):
     with ops.Graph().as_default() as g:
       with ops.device("/job:ps"):
-        v = variables.Variable(1.0)
-      unused_assign_op = v.assign(2.0)
-      unused_assign_2_op = v.assign(3.0)
-      unused_add_t = v + v
+        v1 = constant_op.constant(1.0)
+        v2 = constant_op.constant(1.0)
+      _ = v1 + v2
+      _ = v1 - v2
+      _ = array_ops.identity(v1)
     gdef = g.as_graph_def()
 
     # We'll use the following device function to observe ops with two inputs.
     ops_with_two_inputs = []
 
-    def input_counter(op):
-      if any(in_t.dtype._is_ref_dtype for in_t in op.inputs):  # pylint: disable=protected-access
+    def InputCounter(op):
+      if len(op.inputs) == 2:
         ops_with_two_inputs.append(op)
       return ""
 
     with ops.Graph().as_default() as g:
-      with ops.device(input_counter):
+      with ops.device(InputCounter):
         importer.import_graph_def(gdef)
 
-    # We expect to see the initializer, two assign operations, and the add op.
-    self.assertEqual(4, len(ops_with_two_inputs))
+    # We expect to see the add and subtract, but not identity.
+    self.assertEqual(2, len(ops_with_two_inputs))
 
   def testGradient(self):
     with ops.Graph().as_default() as g:
@@ -797,7 +849,7 @@ class ImportGraphDefTest(test.TestCase):
         with ops.Graph().as_default():
           a, = importer.import_graph_def(
               self._MakeGraphDef(
-                  "node { name: 'A' op: 'Oii' }",
+                  "node { name: 'A' op: 'TwoIntOutputs' }",
                   producer=producer,
                   min_consumer=min_consumer),
               return_elements=["A"])
@@ -828,6 +880,24 @@ class ImportGraphDefTest(test.TestCase):
       with self.test_session(graph=g) as sess:
         with self.assertRaisesRegexp(Exception, pat):
           sess.run(x)
+
+  def testVersionAppliesToOpConstruction(self):
+    """These tests rely on shape fns in test_ops.cc."""
+    with ops.Graph().as_default():
+      importer.import_graph_def(
+          self._MakeGraphDef(
+              "node { name: 'A' op: 'RequiresOlderGraphVersion' }",
+              producer=versions.GRAPH_DEF_VERSION - 1),
+          return_elements=["A"])
+
+    with ops.Graph().as_default():
+      with self.assertRaisesWithPredicateMatch(ValueError,
+                                               "Wrong graph version.*"):
+        importer.import_graph_def(
+            self._MakeGraphDef(
+                "node { name: 'A' op: 'RequiresOlderGraphVersion' }",
+                producer=versions.GRAPH_DEF_VERSION),
+            return_elements=["A"])
 
   def testDefaultAttrsAdded(self):
     with ops.Graph().as_default():
@@ -868,6 +938,135 @@ class ImportGraphDefTest(test.TestCase):
           return_elements=["A"],
           producer_op_list=producer_op_list)
       self.assertEqual(987, a[0].get_attr("default_int"))
+
+  def testFunctions(self):
+    dtype = dtypes.float32
+    @function.Defun(dtype, dtype, dtype, dtype)
+    def Grad(x, y, dout1, dout2):  # pylint: disable=unused-argument
+      # Return the inputs for simplicity of testing. The correct return value
+      # would be (dout1 + dout2, dout1 - dout2)
+      return x, y
+
+    @function.Defun(dtype, dtype, grad_func=Grad)
+    def FuncWithGrad(x, y):
+      return x + y, x - y
+
+    @function.Defun(dtypes.int32)
+    def ExternalTensorFunc(x):
+      # c must be defined in the containing graph
+      return x + c
+
+    @function.Defun(dtypes.int32, dtypes.int32)
+    def OuterFunc(x, y):
+
+      @function.Defun(dtypes.int32)
+      def InnerFunc(x):
+        return x + x
+
+      return InnerFunc(x) + y
+
+    # Create graph with function calls and export to GraphDef
+    with ops.Graph().as_default() as g1:
+      p1 = array_ops.placeholder(dtype, name="p1")
+      p2 = array_ops.placeholder(dtype, name="p2")
+      # pylint: disable=unexpected-keyword-arg
+      a, b = FuncWithGrad(p1, p2, name="f")
+
+      c = constant_op.constant(10, dtype=dtypes.int32)
+      ExternalTensorFunc(1, name="external")
+
+      OuterFunc(10, 1, name="outer")
+      # pylint: enable=unexpected-keyword-arg
+
+    gdef = g1.as_graph_def()
+
+    # Import GraphDef into new graph, add imported gradients, and test that
+    # imported functions can be run
+    with ops.Graph().as_default() as g2:
+      p1, p2, a, b = importer.import_graph_def(
+          gdef, return_elements=["p1:0", "p2:0", "f:0", "f:1"], name="")
+      grad = gradients_impl.gradients([a], [p1, p2])
+
+      with self.test_session(graph=g2) as sess:
+        feed_dict = {p1: 1, p2: 2}
+        a_val, b_val, grad_val = sess.run([a, b, grad], feed_dict=feed_dict)
+        self.assertEqual(a_val, 3.0)
+        self.assertEqual(b_val, -1.0)
+        # Grad function returns inputs values for testing
+        self.assertEqual(grad_val, [1.0, 2.0])
+        self.assertEqual(sess.run("external:0"), 11)
+        self.assertEqual(sess.run("outer:0"), 21)
+
+    # Export the new graph and reimport to test that imported functions can be
+    # successfully exported/imported again
+    gdef = g2.as_graph_def()
+    with ops.Graph().as_default() as g3:
+      p1, p2, a, b = importer.import_graph_def(
+          gdef, return_elements=["p1:0", "p2:0", "f:0", "f:1"], name="")
+      # Create new gradient functions (in additional to the imported gradient
+      # functions created in g2).
+      grad = gradients_impl.gradients([a], [p1, p2])
+
+      with self.test_session(graph=g3) as sess:
+        feed_dict = {p1: 1, p2: 2}
+        a_val, b_val, grad_val = sess.run([a, b, grad], feed_dict=feed_dict)
+        self.assertEqual(a_val, 3.0)
+        self.assertEqual(b_val, -1.0)
+        self.assertEqual(grad_val, [1.0, 2.0])
+        self.assertEqual(sess.run("external:0"), 11)
+        self.assertEqual(sess.run("outer:0"), 21)
+
+  def testImportInsideDefun(self):
+    g = ops.Graph()
+    with g.as_default():
+      @function.Defun()
+      def Add2(x, y):
+        return math_ops.add(x, y)
+
+      x = constant_op.constant(3.0, dtype=dtypes.float32)
+      y = constant_op.constant(-5.0, dtype=dtypes.float32)
+      z = Add2(x, y, name="z")  # pylint: disable=unexpected-keyword-arg
+
+    gdef = g.as_graph_def()
+
+    @function.Defun()
+    def TestFunc():
+      return importer.import_graph_def(gdef, return_elements=["z:0"])[0]
+
+    z = TestFunc()
+
+    with self.test_session():
+      z_val = z.eval()
+      self.assertEqual(z_val, -2.0)
+
+  def testImportGraphWithFunctionTwice(self):
+    g = ops.Graph()
+    with g.as_default():
+      @function.Defun()
+      def Add2(x, y):
+        return math_ops.add(x, y)
+
+      x = array_ops.placeholder(dtype=dtypes.float32, name="x")
+      y = array_ops.placeholder(dtype=dtypes.float32, name="y")
+      _ = Add2(x, y, name="z")  # pylint: disable=unexpected-keyword-arg
+
+    gdef = g.as_graph_def()
+
+    x = random_ops.random_uniform(dtype=dtypes.float32, shape=())
+    y = random_ops.random_uniform(dtype=dtypes.float32, shape=())
+    input_map = {"x:0": x, "y:0": y}
+
+    with ops.name_scope("first"):
+      z1 = importer.import_graph_def(gdef, return_elements=["z:0"],
+                                     input_map=input_map)[0]
+
+    with ops.name_scope("second"):
+      z2 = importer.import_graph_def(gdef, return_elements=["z:0"],
+                                     input_map=input_map)[0]
+
+    with self.test_session() as sess:
+      z1_val, z2_val = sess.run((z1, z2))
+      self.assertAllEqual(z1_val, z2_val)
 
 
 if __name__ == "__main__":

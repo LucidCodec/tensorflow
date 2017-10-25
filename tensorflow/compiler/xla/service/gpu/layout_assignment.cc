@@ -30,7 +30,7 @@ namespace gpu {
 
 Status GpuLayoutAssignment::AddBackendConstraints(
     LayoutConstraints* constraints) {
-  for (auto& instruction : constraints->computation()->instructions()) {
+  for (auto* instruction : constraints->computation()->instructions()) {
     // cuDNN is called with specific layouts on the input, output, and filter:
     //
     //   input: DataLayout::kBatchDepthYX
@@ -51,19 +51,19 @@ Status GpuLayoutAssignment::AddBackendConstraints(
       if (instruction->opcode() == HloOpcode::kConvolution) {
         input = instruction->mutable_operand(0);
         filter = instruction->mutable_operand(1);
-        output = instruction.get();
+        output = instruction;
       } else {
         CHECK_EQ(HloOpcode::kFusion, instruction->opcode());
         switch (instruction->fusion_kind()) {
           case HloInstruction::FusionKind::kConvBackwardFilter:
             // filter = BackwardFilterConvolve(input, output)
             input = instruction->mutable_operand(0);
-            filter = instruction.get();
+            filter = instruction;
             output = instruction->mutable_operand(1);
             break;
           case HloInstruction::FusionKind::kConvBackwardInput:
             // input = BackwardInputConvolve(output, filter)
-            input = instruction.get();
+            input = instruction;
             filter = instruction->mutable_operand(1);
             output = instruction->mutable_operand(0);
             break;
@@ -79,26 +79,37 @@ Status GpuLayoutAssignment::AddBackendConstraints(
       // calls after we switch to cuDNN v5.
       const ConvolutionDimensionNumbers& dimension_numbers =
           instruction->convolution_dimension_numbers();
+      std::vector<int64> input_layout;
+      for (int i = dimension_numbers.spatial_dimensions_size() - 1; i >= 0;
+           --i) {
+        input_layout.push_back(dimension_numbers.spatial_dimensions(i));
+      }
+      input_layout.push_back(dimension_numbers.input_feature_dimension());
+      input_layout.push_back(dimension_numbers.input_batch_dimension());
       Shape input_shape(input->shape());
-      *input_shape.mutable_layout() =
-          LayoutUtil::MakeLayout({dimension_numbers.spatial_dimensions(1),
-                                  dimension_numbers.spatial_dimensions(0),
-                                  dimension_numbers.feature_dimension(),
-                                  dimension_numbers.batch_dimension()});
+      *input_shape.mutable_layout() = LayoutUtil::MakeLayout(input_layout);
 
+      std::vector<int64> filter_layout;
+      for (int i = dimension_numbers.kernel_spatial_dimensions_size() - 1;
+           i >= 0; --i) {
+        filter_layout.push_back(dimension_numbers.kernel_spatial_dimensions(i));
+      }
+      filter_layout.push_back(
+          dimension_numbers.kernel_input_feature_dimension());
+      filter_layout.push_back(
+          dimension_numbers.kernel_output_feature_dimension());
       Shape filter_shape(filter->shape());
-      *filter_shape.mutable_layout() = LayoutUtil::MakeLayout(
-          {dimension_numbers.kernel_spatial_dimensions(1),
-           dimension_numbers.kernel_spatial_dimensions(0),
-           dimension_numbers.kernel_input_feature_dimension(),
-           dimension_numbers.kernel_output_feature_dimension()});
+      *filter_shape.mutable_layout() = LayoutUtil::MakeLayout(filter_layout);
 
+      std::vector<int64> output_layout;
+      for (int i = dimension_numbers.spatial_dimensions_size() - 1; i >= 0;
+           --i) {
+        output_layout.push_back(dimension_numbers.spatial_dimensions(i));
+      }
+      output_layout.push_back(dimension_numbers.output_feature_dimension());
+      output_layout.push_back(dimension_numbers.output_batch_dimension());
       Shape output_shape(output->shape());
-      *output_shape.mutable_layout() =
-          LayoutUtil::MakeLayout({dimension_numbers.spatial_dimensions(1),
-                                  dimension_numbers.spatial_dimensions(0),
-                                  dimension_numbers.feature_dimension(),
-                                  dimension_numbers.batch_dimension()});
+      *output_shape.mutable_layout() = LayoutUtil::MakeLayout(output_layout);
 
       // Set layouts of the instructions' shapes.
       if (instruction->opcode() == HloOpcode::kConvolution) {
